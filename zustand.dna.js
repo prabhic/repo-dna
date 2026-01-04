@@ -140,11 +140,13 @@ function TransientExample() {
 // EXTENSION POINT: Middleware Pattern
 // =============================================================================
 // How Zustand grows: Middleware wraps setState/getState to add behavior
+// Note: These are simplified examples for demonstration - production middleware
+// would include error handling, environment checks, and configuration options
 
 const logger = (config) => (set, get, api) => 
   config(
     (...args) => {
-      console.log('  applying', args);
+      console.log('  applying', args); // Demo only - add dev mode check in production
       set(...args);
       console.log('  new state', get());
     },
@@ -156,6 +158,7 @@ const persist = (config, options) => (set, get, api) =>
   config(
     (...args) => {
       set(...args);
+      // Demo only - add try/catch and storage availability check in production
       localStorage.setItem(options.name, JSON.stringify(get()));
     },
     get,
