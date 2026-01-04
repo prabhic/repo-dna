@@ -1,0 +1,429 @@
+"""
+REPO-DNA: DeepWiki-Open
+Source:  https://github.com/AsyncFuncAI/deepwiki-open
+Identity: AI-powered wiki generator that transforms any Git repository into interactive documentation using RAG and multi-provider LLM orchestration. 
+
+This is not the repo.  This is what makes the repo unique.
+"""
+
+# =============================================================================
+# IDENTITY CORE:  The Repository Ingestion → Embedding → RAG → Wiki Pipeline
+# =============================================================================
+
+# DeepWiki's unique insight: Treat any codebase as a knowledge base that can be
+# queried, visualized, and documented automatically through a unified pipeline.
+
+class WikiGenerationPipeline:
+    """
+    The core abstraction:  Repository → Embeddings → FAISS Index → RAG → Wiki Pages
+    This pipeline is the DNA of DeepWiki - everything flows through it.
+    """
+    
+    def __init__(self, repo_url:  str, provider: str = "google", model: str = None):
+        self.repo_url = repo_url
+        self.embedder = self._init_embedder()  # OpenAI, Google, Ollama, or Bedrock
+        self. db_manager = DatabaseManager()
+        self.retriever = None
+        self.generator = self._init_generator(provider, model)
+    
+    def prepare(self, access_token: str = None):
+        # Clone repo → Read documents → Chunk → Embed → Store in FAISS
+        docs = self.db_manager.prepare_database(self.repo_url, access_token)
+        self.retriever = FAISSRetriever(embedder=self.embedder, documents=docs)
+    
+    def query(self, question: str) -> str:
+        # RAG:  Retrieve relevant code chunks → Augment prompt → Generate answer
+        context = self.retriever(question)
+        return self.generator.generate(question, context)
+
+
+# =============================================================================
+# SIGNATURE PATTERN 1: Multi-Provider LLM Abstraction
+# =============================================================================
+
+# DeepWiki doesn't commit to one LLM - it abstracts all providers behind a
+# unified interface. This is THE pattern that repeats throughout the codebase.
+
+def get_model_config(provider: str, model: str = None) -> dict:
+    """
+    The universal model configuration pattern. 
+    Every LLM call in DeepWiki goes through this abstraction. 
+    """
+    PROVIDER_CONFIGS = {
+        "google": {
+            "model_client": GoogleGenAIClient,
+            "model_kwargs": {
+                "model":  model or "gemini-2. 5-flash",
+                "temperature": 0.7,
+                "top_p": 0.8,
+                "top_k": 40
+            }
+        },
+        "openai": {
+            "model_client": OpenAIClient,
+            "model_kwargs": {
+                "model": model or "gpt-4o",
+                "temperature": 0.7,
+                "top_p": 0.8
+            }
+        },
+        "openrouter": {
+            "model_client":  OpenRouterClient,
+            "model_kwargs": {"model": model, "temperature": 0.7}
+        },
+        "ollama": {
+            "model_client":  OllamaClient,
+            "model_kwargs": {
+                "model":  model or "llama3",
+                "num_ctx": 8192
+            }
+        },
+        "bedrock": {
+            "model_client": BedrockClient,
+            "model_kwargs": {"model":  model}
+        },
+        "azure": {
+            "model_client": AzureAIClient,
+            "model_kwargs":  {"model": model}
+        }
+    }
+    return PROVIDER_CONFIGS.get(provider, PROVIDER_CONFIGS["google"])
+
+
+# =============================================================================
+# SIGNATURE PATTERN 2:  Streaming WebSocket + HTTP Fallback
+# =============================================================================
+
+# DeepWiki uses WebSocket for real-time streaming with automatic HTTP fallback.
+# This dual-transport pattern appears in wiki generation, chat, and research.
+
+async def handle_websocket_chat(websocket: WebSocket):
+    """
+    The streaming pattern:  WebSocket primary, HTTP fallback.
+    This is how DeepWiki achieves real-time wiki generation.
+    """
+    await websocket.accept()
+    request = await websocket.receive_json()
+    
+    # Prepare RAG retriever for this repository
+    rag = RAG(provider=request. provider, model=request. model)
+    rag.prepare_retriever(request. repo_url, request. type, request.token)
+    
+    # Retrieve context and stream response
+    context = rag(request.query)
+    
+    # Stream chunks via WebSocket
+    async for chunk in generate_streaming_response(request, context):
+        await websocket.send_text(chunk)
+    
+    await websocket.close()
+
+
+# Frontend WebSocket consumption (TypeScript pattern)
+WEBSOCKET_PATTERN = """
+const ws = new WebSocket(`${wsBaseUrl}/ws/chat`);
+ws.onopen = () => ws.send(JSON. stringify(requestBody));
+ws.onmessage = (event) => { content += event.data; };
+ws.onerror = () => { /* Fallback to HTTP */ };
+"""
+
+
+# =============================================================================
+# SIGNATURE PATTERN 3: Document Processing Pipeline
+# =============================================================================
+
+# The text splitter → embedder → vector store pattern is the heart of RAG. 
+
+def prepare_data_pipeline(embedder_type: str = "openai"):
+    """
+    Split documents → Create embeddings → Store vectors. 
+    This three-stage pipeline powers all retrieval in DeepWiki.
+    """
+    splitter = TextSplitter(
+        split_by="word",
+        chunk_size=400,
+        chunk_overlap=200
+    )
+    
+    embedder = get_embedder(embedder_type)  # OpenAI, Google, Ollama, Bedrock
+    
+    embedder_transformer = ToEmbeddings(embedder=embedder, batch_size=500)
+    
+    return Sequential(splitter, embedder_transformer)
+
+
+def read_all_documents(path: str, excluded_dirs: list = None):
+    """
+    Document ingestion with intelligent filtering.
+    Code files prioritized over docs, test files deprioritized. 
+    """
+    CODE_EXTENSIONS = [". py", ".js", ".ts", ".java", ".go", ".rs", ".cpp"]
+    DOC_EXTENSIONS = [". md", ".txt", ".rst", ".json", ".yaml"]
+    
+    documents = []
+    for ext in CODE_EXTENSIONS + DOC_EXTENSIONS:
+        for file_path in glob(f"{path}/**/*{ext}", recursive=True):
+            if should_process_file(file_path, excluded_dirs):
+                content = read_file(file_path)
+                documents.append(Document(
+                    text=content,
+                    meta_data={
+                        "file_path":  file_path,
+                        "is_code": ext in CODE_EXTENSIONS,
+                        "is_implementation": "test" not in file_path. lower()
+                    }
+                ))
+    return documents
+
+
+# =============================================================================
+# ARCHITECTURAL DNA: The RAG Component
+# =============================================================================
+
+class RAG(Component):
+    """
+    The "Aha" class: Once you understand RAG, you understand DeepWiki. 
+    
+    RAG = Repository + Embeddings + FAISS + LLM Generator
+    Every feature (Ask, DeepResearch, Wiki Generation) is built on this. 
+    """
+    
+    def __init__(self, provider="google", model=None):
+        self.provider = provider
+        self.model = model
+        self. embedder = get_embedder()
+        self.memory = Memory()  # Conversation history
+        self.db_manager = DatabaseManager()
+        
+        # The generator uses dynamic model configuration
+        generator_config = get_model_config(provider, model)
+        self.generator = Generator(
+            template=RAG_TEMPLATE,
+            model_client=generator_config["model_client"](),
+            model_kwargs=generator_config["model_kwargs"]
+        )
+    
+    def prepare_retriever(self, repo_url: str, repo_type: str = "github", 
+                          access_token: str = None):
+        # Clone → Parse → Embed → Index
+        self.transformed_docs = self.db_manager.prepare_database(
+            repo_url, repo_type, access_token
+        )
+        
+        # Validate embedding dimensions (critical for FAISS)
+        self.transformed_docs = self._validate_embeddings(self.transformed_docs)
+        
+        # Create FAISS retriever with document vectors
+        self.retriever = FAISSRetriever(
+            embedder=self.embedder,
+            documents=self. transformed_docs,
+            document_map_func=lambda doc: doc.vector
+        )
+    
+    def __call__(self, query: str) -> list:
+        # Semantic search:  query → embedding → nearest neighbors
+        retrieved = self.retriever(query)
+        retrieved[0].documents = [
+            self.transformed_docs[idx] for idx in retrieved[0]. doc_indices
+        ]
+        return retrieved
+
+
+# =============================================================================
+# EXTENSION POINTS: How DeepWiki Expects to Grow
+# =============================================================================
+
+# 1. New LLM Providers: Add to get_model_config() and provider handlers
+# 2. New Embedding Backends: Implement embedder interface, add to get_embedder()
+# 3. New Repository Types:  Extend download_repo() for new Git forges
+# 4. New Features: Build on RAG class (like DeepResearch extends Ask)
+
+# Provider extension seam: 
+EMBEDDER_TYPES = {
+    "openai": lambda: OpenAIEmbedder(),
+    "google": lambda: GoogleEmbedder(),
+    "ollama":  lambda: OllamaEmbedder(),
+    "bedrock": lambda: BedrockEmbedder()
+}
+
+def get_embedder(embedder_type: str = None):
+    """Extension point for new embedding providers."""
+    if embedder_type is None:
+        embedder_type = os.getenv("DEEPWIKI_EMBEDDER_TYPE", "openai")
+    return EMBEDDER_TYPES.get(embedder_type, EMBEDDER_TYPES["openai"])()
+
+
+# Repository type extension seam:
+def download_repo(repo_url: str, local_path: str, repo_type: str, token: str):
+    """Extension point for new repository hosting providers."""
+    URL_FORMATTERS = {
+        "github": lambda:  f"{token}@{parsed. netloc}",
+        "gitlab": lambda: f"oauth2:{token}@{parsed.netloc}",
+        "bitbucket": lambda: f"x-token-auth:{token}@{parsed.netloc}"
+        # Add new forge here:  "forgejo": lambda: ... 
+    }
+    # Clone with formatted auth URL
+
+
+# =============================================================================
+# THE DEEP RESEARCH PATTERN: Multi-Turn Investigation
+# =============================================================================
+
+# DeepResearch is a recursive RAG pattern that builds on itself. 
+
+DEEP_RESEARCH_PROMPTS = {
+    "first":  """
+        You are conducting a multi-turn Deep Research process.
+        Start with "## Research Plan" and outline your approach.
+        End with "## Next Steps" for the next iteration.
+    """,
+    "intermediate": """
+        This is iteration {n} of the research process.
+        Build on previous findings.  Start with "## Research Update {n}".
+        Focus on gaps identified in previous iterations.
+    """,
+    "final":  """
+        This is the final iteration.  Synthesize ALL findings.
+        Start with "## Final Conclusion".
+        Provide a complete answer to the original question. 
+    """
+}
+
+
+# =============================================================================
+# DATA FLOW VISUALIZATION
+# =============================================================================
+
+"""
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        DeepWiki Data Flow                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  User Input (repo URL) ──► Clone Repository ──► Read Documents              │
+│                                                      │                      │
+│                                                      ▼                      │
+│                                            ┌─────────────────┐              │
+│                                            │  Text Splitter  │              │
+│                                            │  (chunk by word)│              │
+│                                            └────────┬────────┘              │
+│                                                     │                       │
+│                                                     ▼                       │
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────────────────┐           │
+│  │   OpenAI    │   │   Google    │   │        Ollama           │           │
+│  │  Embedder   │ OR│  Embedder   │ OR│       Embedder          │           │
+│  └──────┬──────┘   └──────┬──────┘   └───────────┬─────────────┘           │
+│         │                 │                      │                          │
+│         └─────────────────┴──────────────────────┘                          │
+│                           │                                                 │
+│                           ▼                                                 │
+│                  ┌─────────────────┐                                        │
+│                  │  FAISS Index    │                                        │
+│                  │ (Vector Store)  │                                        │
+│                  └────────┬────────┘                                        │
+│                           │                                                 │
+│   User Query ────────────►│                                                 │
+│                           ▼                                                 │
+│                  ┌─────────────────┐                                        │
+│                  │   RAG Retriever │ ──► Retrieved Context                  │
+│                  └────────┬────────┘            │                           │
+│                           │                     │                           │
+│                           ▼                     ▼                           │
+│                  ┌─────────────────────────────────────────┐                │
+│                  │           LLM Generator                  │                │
+│                  │  (Google/OpenAI/OpenRouter/Ollama/Azure) │                │
+│                  └────────────────┬────────────────────────┘                │
+│                                   │                                         │
+│                                   ▼                                         │
+│                          ┌───────────────┐                                  │
+│                          │ WebSocket     │                                  │
+│                          │ Streaming     │ ──► Wiki Pages                   │
+│                          └───────────────┘                                  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+"""
+
+# =============================================================================
+# CONFIGURATION-AS-CODE PATTERN
+# =============================================================================
+
+# DeepWiki externalizes all tunable parameters to JSON config files.
+# This allows runtime customization without code changes. 
+
+CONFIG_SCHEMA = {
+    "generator. json": {
+        # LLM provider configurations
+        "providers": ["google", "openai", "openrouter", "ollama", "bedrock", "azure"],
+        "default_models": {"google": "gemini-2.5-flash", "openai": "gpt-4o"},
+        "model_params": {"temperature": 0.7, "top_p": 0.8, "top_k": 40}
+    },
+    "embedder.json": {
+        # Embedding model configurations
+        "types": ["openai", "google", "ollama", "bedrock"],
+        "default":  "openai",
+        "batch_size": 500
+    },
+    "repo.json": {
+        # Repository processing rules
+        "excluded_dirs": ["node_modules", ". git", "venv", "__pycache__"],
+        "excluded_files": ["package-lock.json", "yarn.lock", "*. pyc"]
+    }
+}
+
+
+# =============================================================================
+# THE WIKI STRUCTURE:  XML-BASED PAGE DEFINITION
+# =============================================================================
+
+# DeepWiki uses XML to define wiki structure, parsed from LLM output. 
+
+WIKI_STRUCTURE_PROMPT = """
+Analyze this repository and return ONLY valid XML: 
+
+<wiki>
+  <title>Repository Name</title>
+  <description>What this repo does</description>
+  <pages>
+    <page id="overview" title="Overview" importance="high">
+      <description>Main architecture</description>
+      <relevant_files>src/main.py, README.md</relevant_files>
+    </page>
+    <!-- More pages... -->
+  </pages>
+</wiki>
+"""
+
+# Each page is generated independently using RAG against its relevant_files. 
+
+
+# =============================================================================
+# KEY INSIGHT: Everything is a Chat Completion with Context
+# =============================================================================
+
+# Whether it's wiki generation, Q&A, or research - the pattern is identical: 
+# 1. Prepare RAG retriever for the repository
+# 2. Retrieve relevant context for the query
+# 3. Stream LLM response with that context
+
+async def unified_generation_pattern(repo_url, query, provider, model):
+    """The universal pattern behind all DeepWiki features."""
+    rag = RAG(provider=provider, model=model)
+    rag.prepare_retriever(repo_url)
+    
+    context = rag(query)
+    
+    prompt = f"""
+    {SYSTEM_PROMPT}
+    
+    <context>
+    {format_context(context)}
+    </context>
+    
+    <query>{query}</query>
+    """
+    
+    async for chunk in stream_llm_response(prompt, provider, model):
+        yield chunk
+
+
+# This is DeepWiki's DNA:  A flexible RAG pipeline that can be pointed at
+# any repository, with any LLM, to answer any question about the code. 
