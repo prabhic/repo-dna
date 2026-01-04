@@ -437,20 +437,15 @@ const REACT_ESSENCE = {
   
   // 2. State updates trigger reconciliation
   setState: (newState) => {
-    // Schedule work
+    // Schedule work by creating a new root fiber
     nextUnitOfWork = createFiber(REACT_ESSENCE.render(newState), null);
   },
   
-  // 3. Reconciliation computes minimal DOM changes
-  reconcile: (oldTree, newTree) => {
-    // Diff algorithm
-    return computeEffectList(oldTree, newTree);
-  },
+  // 3. Reconciliation computes minimal DOM changes (conceptual)
+  // In actual implementation, reconcileChildren does this
   
-  // 4. Commit applies changes synchronously
-  commit: (effectList) => {
-    effectList.forEach(applyEffect);
-  },
+  // 4. Commit applies changes synchronously (conceptual)
+  // In actual implementation, commitRoot and commitWork do this
 };
 
 /*
