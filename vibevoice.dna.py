@@ -109,10 +109,11 @@ class VibeVoiceBackbone(nn.Module):
         self.embed_tokens = nn.Embedding(151936, hidden_size)  # Qwen2 vocab
         self.norm = nn.RMSNorm(hidden_size)
     
-    def forward(self, input_ids, acoustic_embeds=None, attention_mask=None):
+    def forward(self, input_ids, acoustic_embeds=None, attention_mask=None, past_key_values=None):
         """
         input_ids: Text token IDs
         acoustic_embeds: Optional speech frame embeddings to interleave
+        past_key_values: Optional cached key-values for efficient generation
         """
         # Embed text
         hidden = self.embed_tokens(input_ids)
@@ -176,9 +177,13 @@ class DiffusionHead(nn.Module):
     def __init__(self, llm_hidden_size=1024, acoustic_dim=64, num_layers=12):
         super().__init__()
         self.acoustic_dim = acoustic_dim
+        self.llm_hidden_size = llm_hidden_size
         
         # Timestep embedder: Convert diffusion step to conditioning vector
         self.timestep_embedder = TimestepEmbedder(llm_hidden_size)
+        
+        # Input projection from acoustic to hidden dimension
+        self.input_proj = nn.Linear(acoustic_dim, llm_hidden_size)
         
         # Cross-attention layers: Condition on LLM hidden states
         self.diffusion_layers = nn.ModuleList([
@@ -198,7 +203,7 @@ class DiffusionHead(nn.Module):
         t_emb = self.timestep_embedder(timestep)
         
         # Project acoustic to hidden dimension
-        hidden = nn.Linear(self.acoustic_dim, llm_hidden.shape[-1])(noisy_acoustic)
+        hidden = self.input_proj(noisy_acoustic)
         
         # Apply diffusion blocks with cross-attention to LLM hidden
         for block in self.diffusion_layers:
@@ -280,6 +285,12 @@ class DiffusionBlock(nn.Module):
 TTS_TEXT_WINDOW = 5      # Process 5 text tokens at a time
 TTS_SPEECH_WINDOW = 6    # Generate 6 acoustic frames (~800ms @ 7.5Hz)
 
+class SimpleTextTokenizer:
+    """Minimal tokenizer for demonstration purposes"""
+    def encode(self, text):
+        # Simple character-level tokenization for demo
+        return [ord(c) for c in text[:100]]  # Truncate for demo
+
 class StreamingGenerator:
     """
     Streaming text-to-speech with interleaved windowed generation.
@@ -287,7 +298,7 @@ class StreamingGenerator:
     """
     def __init__(self, model, tokenizer, acoustic_tokenizer, voice_embedding):
         self.model = model
-        self.tokenizer = tokenizer
+        self.tokenizer = tokenizer if tokenizer else SimpleTextTokenizer()
         self.acoustic_tokenizer = acoustic_tokenizer
         self.voice_embedding = voice_embedding  # Embedded speaker identity
         self.ddpm_steps = 10  # Fast sampling: 10 DPM-Solver steps
