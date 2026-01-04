@@ -407,6 +407,16 @@ class Session {
     this.messages.push(assistantMessage);
   }
 
+  estimateTokens() {
+    // Rough token estimation for context management
+    return this.messages.reduce((sum, msg) => {
+      const content = typeof msg.content === 'string' 
+        ? msg.content 
+        : JSON.stringify(msg.content);
+      return sum + Math.ceil(content.length / 4); // ~4 chars per token
+    }, 0);
+  }
+
   async compact() {
     // Summarize old messages to save context window
     const oldMessages = this.messages.slice(0, -20);
@@ -418,6 +428,15 @@ class Session {
     ];
     
     this.compacting = false;
+  }
+
+  async summarizeMessages(messages) {
+    // Use LLM to create concise summary of conversation history
+    const prompt = `Summarize the following conversation history concisely:\n${
+      messages.map(m => `${m.role}: ${m.content}`).join('\n')
+    }`;
+    const summary = await this.agent.summarize(prompt);
+    return summary;
   }
 
   async updateSnapshot() {
@@ -518,11 +537,13 @@ async function handleCodeRequest(userMessage) {
     }
   }
 
-  // 6. Show file changes
-  const snapshot = await session.snapshot();
+  // Show file changes
+  const snapshot = session.snapshot; // Access the snapshot property
   console.log('\n\nChanges made:');
-  for (const file of snapshot.files) {
-    console.log(`  ${file.path} (+${file.additions} -${file.deletions})`);
+  if (snapshot && snapshot.files) {
+    for (const file of snapshot.files) {
+      console.log(`  ${file.path} (+${file.additions} -${file.deletions})`);
+    }
   }
 
   return session;
