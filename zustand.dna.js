@@ -368,8 +368,8 @@ const useGlobalStore = create((set) => ({
 // =============================================================================
 
 const ZUSTAND_ESSENCE = create((set, get, api) => ({
-  // State: Just an object
-  state: { value: 0 },
+  // State: Just properties on the store object
+  value: 0,
   
   // Actions: Just functions that call set
   action: () => set({ value: 1 }),
