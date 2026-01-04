@@ -35,21 +35,21 @@ Repo-DNA extracts five key elements:
 
 ## Format
 
-Each Repo-DNA file is:
+Each Repo-DNA file should be:
 - A single file, under 500 lines
 - Working, syntactically valid code
 - Minimal comments—code speaks for itself
-- Named `{repo-name}.dna.js` (or appropriate extension)
+- Named with `.dna.js` (or appropriate extension), e.g., `react.dna.js`
 
 ## Examples in This Repository
 
-This repository contains Repo-DNA extractions for popular frameworks:
+This repository contains working examples that capture framework essences:
 
 - `react-medium.js` - React's state management and reducer patterns
 - `react-reducer.js` - React's reducer implementation essence
 - `react-useeffect.js` - React's effect system DNA
 
-Each file demonstrates the core unique value proposition of the framework using minimal, working code.
+Each file demonstrates core concepts using minimal, working code. *Note: These files predate the formal Repo-DNA format but embody its spirit.*
 
 ## Generate Your Own Repo-DNA
 
