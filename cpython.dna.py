@@ -116,11 +116,15 @@ class FrameObject(PyObject):
     
     def push(self, val):
         self.f_valuestack.append(val)
-        Py_INCREF(val)
+        # In real CPython, only PyObject* are on stack, so INCREF is safe
+        # Here we skip INCREF for non-PyObject types (educational simplification)
+        if isinstance(val, PyObject):
+            Py_INCREF(val)
     
     def pop(self):
         val = self.f_valuestack.pop()
-        Py_DECREF(val)
+        if isinstance(val, PyObject):
+            Py_DECREF(val)
         return val
 
 
@@ -189,8 +193,11 @@ class GIL:
         self.holder = None
     
     def acquire(self, thread_id):
+        # Note: Real CPython uses condition variables and proper thread synchronization
+        # This is a simplified demonstration - production code would use threading.Lock
+        import time
         while self.locked and self.holder != thread_id:
-            pass  # Wait (real CPython uses condition variables)
+            time.sleep(0.001)  # Avoid busy-wait
         self.locked = True
         self.holder = thread_id
     
@@ -310,6 +317,12 @@ Key innovations:
 # IF YOU UNDERSTAND THIS, YOU UNDERSTAND CPYTHON
 # =============================================================================
 
+# Placeholder types (defined first to avoid forward references)
+code_type = PyTypeObject('code')
+frame_type = PyTypeObject('frame')
+module_type = PyTypeObject('module')
+some_type = PyTypeObject('object')
+
 CPYTHON_ESSENCE = {
     # 1. Everything is a reference-counted object
     'object': lambda: PyObject(some_type),
@@ -326,10 +339,4 @@ The entire implementation in one sentence:
 "Reference-counted objects interpreted by a bytecode VM with a GIL-protected
  evaluation loop and extensible C API."
 """
-
-# Placeholder types
-code_type = PyTypeObject('code')
-frame_type = PyTypeObject('frame')
-module_type = PyTypeObject('module')
-some_type = PyTypeObject('object')
 
