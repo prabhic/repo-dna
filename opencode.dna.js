@@ -4,6 +4,10 @@
  * Identity: AI coding agent with LSP-powered code intelligence and client/server TUI architecture
  * 
  * This is not the repo. This is what makes the repo unique.
+ * 
+ * NOTE: This is conceptual code showing architecture and patterns.
+ * Some functions are referenced but not fully implemented to keep focus
+ * on the unique architectural patterns rather than implementation details.
  */
 
 // =============================================================================
