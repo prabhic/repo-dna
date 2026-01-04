@@ -67,6 +67,7 @@ class Query {
 
   addObserver(observer) { if (!this.observers.includes(observer)) this.observers.push(observer); }
   removeObserver(observer) { this.observers = this.observers.filter(o => o !== observer); }
+  setOptions(options) { this.options = options; } // Update query configuration
 }
 
 // =============================================================================
@@ -216,6 +217,8 @@ class QueryObserver {
 
   notify() { this.listeners.forEach(l => l(this.currentResult)); }
   
+  setOptions(options) { this.options = options; this.updateQuery(); }
+  
   destroy() {
     clearInterval(this.refetchIntervalId);
     this.currentQuery?.removeObserver(this);
@@ -299,25 +302,39 @@ class QueryClient {
   removeQueries(filters) {
     this.queryCache.findAll(filters).forEach(q => this.queryCache.remove(q));
   }
+  
+  cancelQueries(filters) {
+    // Cancel in-flight queries (simplified for DNA)
+    this.queryCache.findAll(filters).forEach(q => {
+      if (q.promise) q.promise = null;
+    });
+  }
 }
 
 // =============================================================================
 // EXTENSION POINTS: Framework Adapters
 // =============================================================================
 // Core is framework-agnostic. Adapters wrap QueryObserver with framework primitives.
+// Note: React import omitted for clarity - this shows the pattern, not full implementation
 
 function useQuery(options, queryClient) {
-  const [, forceUpdate] = React.useReducer(x => x + 1, 0);
-  const observerRef = React.useRef(null);
+  // const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+  // const observerRef = React.useRef(null);
   
-  if (!observerRef.current) {
-    observerRef.current = new QueryObserver(queryClient, options);
-  }
+  // Conceptual React integration pattern:
+  // 1. Create observer once
+  const observer = new QueryObserver(queryClient, options);
   
-  React.useEffect(() => observerRef.current.subscribe(() => forceUpdate()), []);
-  observerRef.current.setOptions(options);
+  // 2. Subscribe to changes and trigger re-render
+  observer.subscribe(() => {
+    // forceUpdate() - trigger component re-render
+  });
   
-  return observerRef.current.currentResult;
+  // 3. Update options on each render
+  observer.setOptions(options);
+  
+  // 4. Return current result
+  return observer.currentResult;
 }
 
 // =============================================================================
