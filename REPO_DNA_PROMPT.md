@@ -34,7 +34,7 @@ Every repository exists because it offers something unique. Like DNA in biologyâ
 
 Given the repository: {REPO_NAME}
 
-Generate a single file (`{repo-name}.dna.js` or appropriate extension) that captures:
+Generate a single file (e.g., `react.dna.js` for facebook/react) that captures:
 
 1. **Identity Core**: What is the ONE unique insight or approach this repo embodies? Express it in code, not comments.
 

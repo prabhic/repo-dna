@@ -45,7 +45,9 @@ Each Repo-DNA file is:
 
 This repository contains Repo-DNA extractions for popular frameworks:
 
-- **react-*.js** - Various aspects of React's DNA (hooks, reducers, effects)
+- `react-medium.js` - React's state management and reducer patterns
+- `react-reducer.js` - React's reducer implementation essence
+- `react-useeffect.js` - React's effect system DNA
 
 Each file demonstrates the core unique value proposition of the framework using minimal, working code.
 
