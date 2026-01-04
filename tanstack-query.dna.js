@@ -17,30 +17,31 @@ class Query {
     this.queryKey = config.queryKey;
     this.queryHash = config.queryHash;
     this.queryFn = config.options?.queryFn;
+    this.options = config.options || {};
     this.observers = [];
     this.state = {
       data: undefined, dataUpdatedAt: 0, error: null, errorUpdatedAt: 0,
       fetchFailureCount: 0, fetchStatus: 'idle', status: 'pending', isInvalidated: false
     };
-    this.promise = null;
-    this.gcTime = config.options?.gcTime ?? 5 * 60 * 1000;
+    this.retryer = null;
+    this.gcTime = this.options.gcTime ?? 5 * 60 * 1000;
   }
 
   fetch(options = {}) {
-    if (this.state.fetchStatus !== 'idle' && this.promise && !options.cancelRefetch) {
-      return this.promise; // Deduplication
+    if (this.state.fetchStatus !== 'idle' && this.retryer && !options.cancelRefetch) {
+      return this.retryer.promise; // Deduplication
     }
 
-    this.promise = createRetryer({
+    this.retryer = createRetryer({
       fn: () => this.queryFn({ queryKey: this.queryKey, signal: new AbortController().signal }),
       onSuccess: (data) => this.dispatch({ type: 'success', data }),
       onError: (error) => this.dispatch({ type: 'error', error }),
       onFail: (failureCount, error) => this.dispatch({ type: 'failed', failureCount, error }),
-      retry: this.options?.retry ?? 3,
+      retry: this.options.retry ?? 3,
     });
 
     this.dispatch({ type: 'fetch' });
-    return this.promise;
+    return this.retryer.promise;
   }
 
   dispatch(action) {
@@ -304,9 +305,9 @@ class QueryClient {
   }
   
   cancelQueries(filters) {
-    // Cancel in-flight queries (simplified for DNA)
+    // Cancel in-flight queries using retryer
     this.queryCache.findAll(filters).forEach(q => {
-      if (q.promise) q.promise = null;
+      q.retryer?.cancel();
     });
   }
 }
