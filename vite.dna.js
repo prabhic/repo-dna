@@ -45,7 +45,7 @@ class ViteDevServer {
 // Vite's speed: Pre-bundle deps with esbuild (100x faster), convert CJS to ESM
 
 async function optimizeDeps(deps, config) {
-  const result = await require('esbuild').build({
+  await require('esbuild').build({
     entryPoints: deps,
     bundle: true,
     format: 'esm',
@@ -237,7 +237,7 @@ function vuePlugin() {
       const { descriptor } = parse(code);
       const script = compileScript(descriptor, { id });
       const template = compileTemplate({ source: descriptor.template.content, id });
-      return { code: `${script.content}\n${template.code}\nexport default { ...script, render }` };
+      return { code: `${script.content}\n${template.code}\nexport default { ...script, render: ${template.code.match(/function render/)?.[0] || 'render'} }` };
     }
   };
 }
@@ -349,11 +349,11 @@ const url = new URL('./logo.png', import.meta.url);
 // =============================================================================
 
 const VITE_ESSENCE = {
-  dev: (file) => transformOnDemand(file),           // No bundle in dev
-  deps: (packages) => esbuildBundle(packages),      // Pre-bundle deps
-  serve: (url) => pluginContainer.transform(url),   // Transform per request
-  hmr: (file) => moduleGraph.invalidate(file),      // Precise HMR
-  build: () => rollup.bundle()                      // Optimize for prod
+  dev: (file) => server.handleRequest(file),           // No bundle in dev
+  deps: (packages) => optimizeDeps(packages, config),  // Pre-bundle deps
+  serve: (url) => pluginContainer.transform(url),      // Transform per request
+  hmr: (file) => moduleGraph.invalidateModule(file),   // Precise HMR
+  build: () => build(config)                            // Optimize for prod
 };
 
 /*
