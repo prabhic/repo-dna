@@ -436,6 +436,9 @@ struct module {
 #include <linux/init.h>
 #include <linux/cdev.h>
 
+#define MAJOR_NUM 100
+#define DEVICE_NAME "my_device"
+
 static int device_open(struct inode *inode, struct file *file)
 {
     printk(KERN_INFO "Device opened\n");
@@ -613,8 +616,8 @@ static inline void spin_lock(spinlock_t *lock)
 {
     // Disable preemption
     preempt_disable();
-    // Acquire lock (busy wait)
-    while (test_and_set(&lock->raw_lock))
+    // Acquire lock (busy wait with atomic compare-and-exchange)
+    while (!arch_spin_trylock(&lock->raw_lock))
         cpu_relax();
 }
 
