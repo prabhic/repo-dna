@@ -623,8 +623,8 @@ static inline void spin_lock(spinlock_t *lock)
 
 static inline void spin_unlock(spinlock_t *lock)
 {
-    // Release lock
-    lock->raw_lock = 0;
+    // Release lock with proper memory barrier
+    arch_spin_unlock(&lock->raw_lock);
     // Enable preemption
     preempt_enable();
 }
@@ -638,8 +638,9 @@ struct mutex {
 
 void mutex_lock(struct mutex *lock)
 {
-    // Try to acquire quickly
-    if (likely(atomic_cmpxchg_acquire(&lock->owner, 0, current) == 0))
+    // Try to acquire quickly (atomic compare-exchange)
+    long tid = (long)current;
+    if (likely(atomic_cmpxchg_acquire(&lock->owner, 0, tid) == 0))
         return;
     
     // Slow path: Add to wait queue and sleep
@@ -1038,19 +1039,26 @@ void increment_counter(void)
 }
 
 // Pattern 4: Memory Barriers (SMP synchronization)
+// Example demonstrating producer-consumer with memory ordering
+
+int shared_data;
+int data_ready_flag;
+
 void producer(void)
 {
-    data = new_value;
-    wmb();  // Write memory barrier
-    flag = true;
+    int new_value = 42;
+    shared_data = new_value;
+    wmb();  // Write memory barrier - ensure data written before flag
+    data_ready_flag = 1;
 }
 
 void consumer(void)
 {
-    while (!flag)
+    while (!data_ready_flag)
         cpu_relax();
-    rmb();  // Read memory barrier
-    use(data);
+    rmb();  // Read memory barrier - ensure flag read before data
+    // Now safe to use shared_data
+    int value = shared_data;
 }
 
 // =============================================================================
