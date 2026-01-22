@@ -197,167 +197,79 @@ const EditTool = Tool.define('edit', {
 // =============================================================================
 // SIGNATURE PATTERN 3: Client/Server Architecture with TUI
 // =============================================================================
-// OpenCode is not just a CLI—it's a server that multiple clients can connect to.
-// The TUI is just one frontend; mobile apps, web UIs, etc. can connect too.
+// Server exposes HTTP/WebSocket API; TUI is just one client
 
 class OpenCodeServer {
   constructor() {
-    this.sessions = new Map();  // sessionID → Session
-    this.projects = new Map();  // projectID → Project
-    this.bus = new EventBus();  // Event system for real-time updates
+    this.sessions = new Map();
+    this.bus = new EventBus();
   }
 
-  // HTTP/WebSocket API for clients
   async handleRequest(req, res) {
-    const router = {
-      'POST /session/create': async () => {
-        const session = await Session.create({
-          directory: req.body.directory,
-          agent: req.body.agent || 'build'
-        });
-        return { sessionID: session.id };
-      },
-
-      'POST /session/:id/message': async () => {
-        const session = this.sessions.get(req.params.id);
-        const stream = session.processMessage(req.body.content);
-        
-        // Stream response via SSE or WebSocket
-        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-        for await (const chunk of stream) {
-          res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-        }
-        res.end();
-      },
-
-      'GET /lsp/symbols': async () => {
-        const lsp = this.getLSP(req.query.projectID);
-        const symbols = await lsp.getSymbols(req.query.file);
-        return { symbols };
-      },
-
-      'POST /tool/:name': async () => {
-        // Direct tool execution endpoint
-        const tool = ToolRegistry.get(req.params.name);
-        const result = await tool.execute(req.body.args, {
-          sessionID: req.body.sessionID,
-          agent: req.body.agent
-        });
-        return result;
-      }
+    // API routes: /session/create, /session/:id/message, /lsp/symbols, /tool/:name
+    const routes = {
+      'POST /session/create': () => Session.create(req.body),
+      'POST /session/:id/message': () => this.streamMessage(req.params.id, req.body, res),
+      'GET /lsp/symbols': () => this.getLSP(req.query.projectID).getSymbols(req.query.file),
+      'POST /tool/:name': () => ToolRegistry.get(req.params.name).execute(req.body.args)
     };
-
-    return router[`${req.method} ${req.path}`]?.();
+    return routes[`${req.method} ${req.path}`]?.();
   }
 
-  // mDNS discovery for local network clients
+  // mDNS for local discovery
   advertise() {
-    const mdns = new MDNS();
-    mdns.advertise({
-      name: 'OpenCode Server',
-      type: 'opencode',
-      port: 4096
-    });
+    new MDNS().advertise({ name: 'OpenCode', type: 'opencode', port: 4096 });
   }
 }
 
-// TUI Client connects to server via HTTP/WebSocket
+// TUI connects via WebSocket, two-pane layout (chat | context)
 class TUIClient {
   constructor(serverURL) {
     this.ws = new WebSocket(serverURL);
     this.renderer = new TerminalRenderer();
   }
 
-  async run() {
-    // Two-pane layout: chat on left, file tree/output on right
-    this.renderer.layout({
-      left: { type: 'chat', flex: 2 },
-      right: { type: 'context', flex: 1 }
-    });
-
-    // Listen for server events
-    this.ws.on('message', (event) => {
-      if (event.type === 'text-delta') {
-        this.renderer.appendText(event.text);
-      }
-      if (event.type === 'tool-call') {
-        this.renderer.showToolCall(event.tool);
-      }
-      if (event.type === 'permission-request') {
-        this.renderer.promptPermission(event.request);
-      }
-    });
-
-    // Handle user input
-    this.renderer.on('input', (text) => {
-      this.ws.send({ type: 'message', content: text });
-    });
+  run() {
+    this.renderer.layout({ left: 'chat', right: 'context' });
+    this.ws.on('message', (e) => this.renderer.handleEvent(e));
+    this.renderer.on('input', (text) => this.ws.send({ type: 'message', content: text }));
   }
 }
 
 // =============================================================================
 // ARCHITECTURAL DNA: Permission System
 // =============================================================================
-// Fine-grained control over what agents can do. Each action requires permission.
-// Supports rules like "allow *.ts but deny *.env", "ask before bash", etc.
+// Fine-grained control: allow/deny/ask per action and file pattern
 
 class PermissionSystem {
-  constructor(rules) {
-    this.rules = rules; // Hierarchical permission rules
-  }
+  constructor(rules) { this.rules = rules; }
 
   async check(request) {
     const rule = this.matchRule(request.action, request.target);
-    
     if (rule === 'allow') return true;
     if (rule === 'deny') throw new Error('Permission denied');
-    if (rule === 'ask') {
-      // Prompt user for permission
-      const response = await this.promptUser(request);
-      return response === 'allow';
-    }
-    
-    return false; // Default deny
+    if (rule === 'ask') return await this.promptUser(request) === 'allow';
+    return false;
   }
 
   matchRule(action, target) {
-    // Match most specific rule first
-    // Rules can use glob patterns: "*.env" matches all .env files
-    for (const [pattern, permission] of this.rules) {
-      if (matchGlob(pattern, target)) {
-        return permission[action] || permission['*'];
-      }
+    for (const [pattern, perm] of this.rules) {
+      if (matchGlob(pattern, target)) return perm[action] || perm['*'];
     }
-    return 'ask'; // Default to asking
+    return 'ask';
   }
 }
 
-// Built-in agent permissions
+// Agent permissions presets
 const AgentPermissions = {
-  build: {
-    '*': 'allow',              // Full access
-    'doom_loop': 'ask',        // Prevent infinite loops
-    'external_directory': 'ask', // Confirm before touching files outside project
-    'read': {
-      '*': 'allow',
-      '*.env': 'deny',         // Never read secrets
-      '*.env.*': 'deny',
-      '*.env.example': 'allow'
-    }
-  },
-  
-  plan: {
-    'edit': { '*': 'deny' },   // Read-only except for plan files
-    'bash': 'ask',             // Confirm before running commands
-    'read': { '*': 'allow' }
-  }
+  build: { '*': 'allow', 'doom_loop': 'ask', 'read': { '*': 'allow', '*.env': 'deny' } },
+  plan: { 'edit': { '*': 'deny' }, 'bash': 'ask', 'read': { '*': 'allow' } }
 };
 
 // =============================================================================
 // ARCHITECTURAL DNA: Session with Message History & Compaction
 // =============================================================================
-// Sessions maintain conversation state with automatic context compaction
-// when token limits are approached. Snapshots track file changes.
+// Maintains state with auto-compaction when approaching token limits
 
 class Session {
   constructor(id, directory, agent) {
@@ -365,130 +277,62 @@ class Session {
     this.directory = directory;
     this.agent = agent;
     this.messages = [];
-    this.snapshot = null;  // Git-like snapshot of changes
-    this.compacting = false;
+    this.snapshot = null;
   }
 
   async *processMessage(userMessage) {
-    // Add user message
-    this.messages.push({
-      role: 'user',
-      content: userMessage,
-      time: Date.now()
-    });
+    this.messages.push({ role: 'user', content: userMessage, time: Date.now() });
 
-    // Check if compaction needed
-    const tokenCount = this.estimateTokens();
-    if (tokenCount > 100000 && !this.compacting) {
-      await this.compact();
-    }
+    // Auto-compact at 100k tokens
+    if (this.estimateTokens() > 100000) await this.compact();
 
-    // Create assistant message placeholder
-    const assistantMessage = {
-      id: generateID(),
-      role: 'assistant',
-      parts: [],  // Text, tool calls, reasoning
-      time: { start: Date.now() }
-    };
+    const assistantMessage = { id: generateID(), role: 'assistant', parts: [] };
+    const processor = new SessionProcessor({ session: this, agent: this.agent });
 
-    // Process with agent
-    const processor = new SessionProcessor({
-      session: this,
-      message: assistantMessage,
-      agent: this.agent,
-      model: this.agent.model
-    });
-
-    // Stream response
     for await (const part of processor.process()) {
       assistantMessage.parts.push(part);
       yield part;
     }
 
-    // Update snapshot
     await this.updateSnapshot();
-    
     this.messages.push(assistantMessage);
   }
 
   estimateTokens() {
-    // Rough token estimation for context management
-    return this.messages.reduce((sum, msg) => {
-      const content = typeof msg.content === 'string' 
-        ? msg.content 
-        : JSON.stringify(msg.content);
-      return sum + Math.ceil(content.length / 4); // ~4 chars per token
-    }, 0);
+    return this.messages.reduce((sum, m) => sum + Math.ceil((m.content?.length || 0) / 4), 0);
   }
 
   async compact() {
-    // Summarize old messages to save context window
-    const oldMessages = this.messages.slice(0, -20);
-    const summary = await this.summarizeMessages(oldMessages);
-    
-    this.messages = [
-      { role: 'system', content: summary },
-      ...this.messages.slice(-20)
-    ];
-    
-    this.compacting = false;
-  }
-
-  async summarizeMessages(messages) {
-    // Use LLM to create concise summary of conversation history
-    const prompt = `Summarize the following conversation history concisely:\n${
-      messages.map(m => `${m.role}: ${m.content}`).join('\n')
-    }`;
-    const summary = await this.agent.summarize(prompt);
-    return summary;
+    const summary = await this.agent.summarize(this.messages.slice(0, -20));
+    this.messages = [{ role: 'system', content: summary }, ...this.messages.slice(-20)];
   }
 
   async updateSnapshot() {
-    // Track all file changes in this session
     const diff = await gitDiff(this.directory);
-    this.snapshot = {
-      files: diff.files,
-      additions: diff.additions,
-      deletions: diff.deletions,
-      diffs: diff.diffs
-    };
+    this.snapshot = { files: diff.files, additions: diff.additions, deletions: diff.deletions };
   }
 }
 
 // =============================================================================
 // EXTENSION POINTS: Plugin System
 // =============================================================================
-// OpenCode supports custom tools, agents, and LSP servers via plugins.
+// Custom tools, agents, and MCP servers
 
 const PluginSystem = {
-  // Load custom tools from ~/.opencode/tool/*.js
   async loadTools() {
-    const toolFiles = await glob('~/.opencode/tool/*.{js,ts}');
-    for (const file of toolFiles) {
-      const module = await import(file);
-      ToolRegistry.register(module.default);
+    for (const file of await glob('~/.opencode/tool/*.{js,ts}')) {
+      ToolRegistry.register((await import(file)).default);
     }
   },
-
-  // Load custom agents from config
   async loadAgents(config) {
-    for (const [name, agentConfig] of Object.entries(config.agents || {})) {
-      Agent.register({
-        name,
-        ...agentConfig,
-        mode: agentConfig.mode || 'subagent'
-      });
+    for (const [name, cfg] of Object.entries(config.agents || {})) {
+      Agent.register({ name, ...cfg, mode: cfg.mode || 'subagent' });
     }
   },
-
-  // MCP (Model Context Protocol) support
   async loadMCPServers(config) {
-    for (const serverConfig of config.mcp?.servers || []) {
-      const server = await MCP.connect(serverConfig);
-      // Expose MCP tools as OpenCode tools
-      for (const tool of server.tools) {
-        ToolRegistry.register(fromMCPTool(tool));
-      }
+    for (const cfg of config.mcp?.servers || []) {
+      const server = await MCP.connect(cfg);
+      server.tools.forEach(t => ToolRegistry.register(fromMCPTool(t)));
     }
   }
 };
@@ -557,112 +401,24 @@ async function handleCodeRequest(userMessage) {
 // await handleCodeRequest("Add error handling to the login function");
 
 // =============================================================================
-// WHAT MAKES OPENCODE UNIQUE
+// THE ESSENCE: LSP-Native AI Agent
 // =============================================================================
-
 /*
-1. LSP-NATIVE INTELLIGENCE
-   - Not just text search—semantic code understanding via Language Servers
-   - Agents can query symbols, jump to definitions, get diagnostics
-   - Like giving the AI access to an IDE's intelligence
+OpenCode = LLM + Language Server Protocol + Fine-grained Permissions
 
-2. CLIENT/SERVER ARCHITECTURE
-   - Server runs in background, multiple clients can connect
-   - TUI is just one frontend—enables mobile apps, web UIs, etc.
-   - mDNS discovery for seamless local network access
+Unlike text-based AI tools (LLM → Filesystem → Text), OpenCode uses semantic
+code intelligence (LLM → LSP Servers → Semantic Operations). The agent understands
+code structure, types, definitions, and errors—like an IDE, not a text editor.
 
-3. GRANULAR PERMISSION SYSTEM
-   - Fine-grained control: allow/deny/ask per action and file pattern
-   - Prevents agents from reading secrets, running dangerous commands
-   - Built-in "plan" agent is read-only by default
+Key differentiators:
+1. LSP-first: Semantic code understanding via language servers
+2. Client/server: Background server, multiple TUI/web/mobile clients  
+3. Granular permissions: allow/deny/ask per action and file pattern
+4. Multi-agent: Specialized agents (build, plan) with subagent delegation
+5. Extensible: Plugin system with MCP support, custom tools
+6. Provider agnostic: Works with any LLM (Claude, GPT-4, Gemini, local)
 
-4. TOOL EXTENSIBILITY
-   - Dynamic tool registry with plugin support
-   - Custom tools in ~/.opencode/tool/*.js
-   - MCP (Model Context Protocol) integration for external tools
-
-5. MULTI-AGENT SYSTEM
-   - Primary agents (build, plan) for different workflows
-   - Subagents (@general) for specialized tasks
-   - Agent-to-agent delegation with @mentions
-
-6. PROVIDER AGNOSTIC
-   - Works with Claude, GPT-4, Gemini, local models
-   - Not locked into any single LLM provider
-   - Centralized model configuration
-*/
-
-// =============================================================================
-// COMPARISON: What OpenCode is NOT
-// =============================================================================
-
-// NOT Cursor/Copilot:
-// - Full terminal control, not just editor integration
-// - Autonomous agent that can run tests, debug, deploy
-// - Open source, no vendor lock-in
-
-// NOT Claude Code (former "Code Assist"):
-// - Open source vs proprietary
-// - LSP integration for semantic understanding
-// - Client/server architecture vs monolithic
-
-// NOT Aider/Mentat:
-// - TUI-first with streaming updates
-// - Built-in permission system
-// - Multi-agent coordination
-
-// =============================================================================
-// MENTAL MODEL
-// =============================================================================
-
-/*
-Think of OpenCode as:
-
-   User Input → TUI Client → Server → Session
-                                ↓
-                         Agent + Tools + LSP
-                                ↓
-                    LLM ← Context (messages + LSP data)
-                     ↓
-              Tool Calls (with permission checks)
-                     ↓
-            Execute → Update Session → Stream to Client
-
-The magic is in the LSP integration: The agent doesn't just see files as text,
-it sees them as the language server does—with types, symbols, references, errors.
-
-This is the DNA: An AI agent with IDE-level code intelligence.
-*/
-
-// =============================================================================
-// THE GENIUS MOVE
-// =============================================================================
-
-/*
-Most AI coding tools:
-  LLM → File System → Text Operations → Hope for the best
-
-OpenCode:
-  LLM → LSP Servers → Semantic Code Intelligence → Precise Operations
-
-By integrating Language Server Protocol, OpenCode bridges the gap between
-AI agents and real IDE intelligence. The agent can:
-- Understand code structure (classes, functions, types)
-- Navigate references and definitions
-- Detect errors before committing
-- Refactor with confidence
-
-This architectural decision—LSP as a first-class citizen—is what makes
-OpenCode unique. It's not just an AI that edits text, it's an AI that
-understands code the way a developer's IDE does.
-
-Combined with:
-- Fine-grained permissions (security)
-- Client/server architecture (flexibility)  
-- Multi-agent system (specialization)
-- Tool extensibility (customization)
-
-You get: An open-source AI coding agent that's both powerful and safe.
+Flow: User → Client → Server → Agent+Tools+LSP → LLM → Tool Execution → Stream
 */
 
 export { OpenCodeAgent, LSPIntegration, Tool, Session, PermissionSystem };
