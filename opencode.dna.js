@@ -218,7 +218,10 @@ class OpenCodeServer {
         res.end();
       },
       'GET /lsp/symbols': () => this.getLSP(req.query.projectID).getSymbols(req.query.file),
-      'POST /tool/:name': () => ToolRegistry.get(req.params.name).execute(req.body.args)
+      'POST /tool/:name': () => {
+        const tool = ToolRegistry.get(req.params.name);
+        return tool.execute(req.body.args, { sessionID: req.body.sessionID, agent: req.body.agent });
+      }
     };
     return routes[`${req.method} ${req.path}`]?.();
   }
@@ -311,13 +314,16 @@ class Session {
   }
 
   estimateTokens() {
-    return this.messages.reduce((sum, m) => sum + Math.ceil((m.content?.length || 0) / 4), 0);
+    return this.messages.reduce((sum, m) => {
+      const len = m.content?.length || JSON.stringify(m.parts || []).length;
+      return sum + Math.ceil(len / 4);
+    }, 0);
   }
 
   async compact() {
     const oldMessages = this.messages.slice(0, -20);
     const prompt = `Summarize:\n${oldMessages.map(m => `${m.role}: ${m.content}`).join('\n')}`;
-    const summary = await this.agent.summarize(prompt);
+    const summary = await this.agent.llm.complete(prompt); // LLM call to summarize history
     this.messages = [{ role: 'system', content: summary }, ...this.messages.slice(-20)];
   }
 
