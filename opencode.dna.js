@@ -209,7 +209,14 @@ class OpenCodeServer {
     // API routes: /session/create, /session/:id/message, /lsp/symbols, /tool/:name
     const routes = {
       'POST /session/create': () => Session.create(req.body),
-      'POST /session/:id/message': () => this.streamMessage(req.params.id, req.body, res),
+      'POST /session/:id/message': async () => {
+        const session = this.sessions.get(req.params.id);
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        for await (const chunk of session.processMessage(req.body.content)) {
+          res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+        }
+        res.end();
+      },
       'GET /lsp/symbols': () => this.getLSP(req.query.projectID).getSymbols(req.query.file),
       'POST /tool/:name': () => ToolRegistry.get(req.params.name).execute(req.body.args)
     };
@@ -231,7 +238,12 @@ class TUIClient {
 
   run() {
     this.renderer.layout({ left: 'chat', right: 'context' });
-    this.ws.on('message', (e) => this.renderer.handleEvent(e));
+    this.ws.on('message', (event) => {
+      // Handle different event types: text-delta, tool-call, permission-request
+      if (event.type === 'text-delta') this.renderer.appendText(event.text);
+      if (event.type === 'tool-call') this.renderer.showToolCall(event.tool);
+      if (event.type === 'permission-request') this.renderer.promptPermission(event.request);
+    });
     this.renderer.on('input', (text) => this.ws.send({ type: 'message', content: text }));
   }
 }
@@ -303,7 +315,9 @@ class Session {
   }
 
   async compact() {
-    const summary = await this.agent.summarize(this.messages.slice(0, -20));
+    const oldMessages = this.messages.slice(0, -20);
+    const prompt = `Summarize:\n${oldMessages.map(m => `${m.role}: ${m.content}`).join('\n')}`;
+    const summary = await this.agent.summarize(prompt);
     this.messages = [{ role: 'system', content: summary }, ...this.messages.slice(-20)];
   }
 
