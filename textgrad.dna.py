@@ -374,9 +374,9 @@ class MultiFieldVariable(Variable):
     Each field can receive targeted feedback.
     """
     def __init__(self, fields, role_description=""):
+        self.fields = fields
         value = self._serialize(fields)
         super().__init__(value, role_description)
-        self.fields = fields
     
     def _serialize(self, fields):
         return "\n".join(f"{k}: {v}" for k, v in fields.items())
