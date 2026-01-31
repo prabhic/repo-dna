@@ -112,6 +112,7 @@ interface ProjectStore {
   createProject(name: string): string;
   createChatStore(projectId: string): string;
   getChatStore(projectId: string, chatId: string): VanillaChatStore;
+  getProjectById(projectId: string): Project | null;
   addQueuedMessage(projectId: string, content: string): void;
 }
 
@@ -140,9 +141,14 @@ interface ChatState {
   setTaskAssigning(taskId: string, agents: Agent[]): void;
   setTaskRunning(taskId: string, info: TaskInfo[]): void;
   
-  // Progress
+  // Progress and task info
   setProgressValue(taskId: string, val: number): void;
   computedProgressValue(taskId: string): void;
+  setTaskInfo(taskId: string, info: TaskInfo[]): void;
+  
+  // Status and human interaction
+  setStatus(taskId: string, status: 'running' | 'finished' | 'pending' | 'pause'): void;
+  setHasWaitConfirm(taskId: string, hasWait: boolean): void;
 }
 
 interface Task {
@@ -157,7 +163,7 @@ interface Task {
   
   // Human-in-the-loop
   activeAsk: string;
-  hasWaitComfirm: boolean;
+  hasWaitConfirm: boolean;
   
   // Workspace
   fileList: FileInfo[];
@@ -325,7 +331,10 @@ async function startTask(projectId: string, taskId: string, msg: string) {
 
 // Action handler - updates Zustand stores
 async function handle_action(projectId: string, taskId: string, action: ActionData) {
-  const store = projectStore.getChatStore(projectId);
+  const project = projectStore.getProjectById(projectId);
+  if (!project?.activeChatId) return;
+  
+  const store = projectStore.getChatStore(projectId, project.activeChatId);
   
   switch (action.action) {
     case Action.activate_agent:
@@ -343,7 +352,7 @@ async function handle_action(projectId: string, taskId: string, action: ActionDa
       break;
       
     case Action.ask:
-      store.getState().setHasWaitComfirm(taskId, true);
+      store.getState().setHasWaitConfirm(taskId, true);
       break;
       
     case Action.end:
