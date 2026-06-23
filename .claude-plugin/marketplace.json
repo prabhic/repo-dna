@@ -1,0 +1,24 @@
+{
+  "name": "repo-dna",
+  "owner": {
+    "name": "Prabhanjana Kumar",
+    "url": "https://github.com/prabhic"
+  },
+  "metadata": {
+    "description": "Marketplace hosting the Repo-DNA extraction skill."
+  },
+  "plugins": [
+    {
+      "name": "repo-dna",
+      "description": "Extract a codebase's 'Repo-DNA' — the variant fraction that makes it itself — as a single graspable file with a runnable kernel.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Prabhanjana Kumar",
+        "url": "https://github.com/prabhic"
+      },
+      "source": "./",
+      "category": "productivity",
+      "homepage": "https://github.com/prabhic/repo-dna"
+    }
+  ]
+}

@@ -1,457 +1,170 @@
 /*
  * REPO-DNA: React
- * Source: https://github.com/facebook/react
- * Identity: Declarative UI through virtual DOM reconciliation and component composition
- * 
- * This is not the repo. This is what makes the repo unique.
+ * Source: https://github.com/react/react   Commit/Ref: 06b2a50
+ * Archetype: UI library / reconciler (JS monorepo, Flow-typed)
+ * The bet: reconciliation is an INTERRUPTIBLE computation over a mutable fiber
+ *          tree, scheduled cooperatively by priority — render can pause, abort,
+ *          and restart; only commit touches the host.
+ *
+ * This is not the repo. This is its variant fraction — what it does that its
+ * peers do not.
  */
 
-// =============================================================================
-// IDENTITY CORE: Virtual DOM & Reconciliation
-// =============================================================================
-// React's unique approach: UI as a function of state, reconciled efficiently
-// through a virtual representation that minimizes real DOM operations.
-
-function createElement(type, props, ...children) {
-  return {
-    type,
-    props: {
-      ...props,
-      children: children.map(child =>
-        typeof child === 'object' ? child : createTextElement(child)
-      ),
-    },
-  };
-}
-
-function createTextElement(text) {
-  return {
-    type: 'TEXT_ELEMENT',
-    props: { nodeValue: text, children: [] },
-  };
-}
-
-// =============================================================================
-// SIGNATURE PATTERN 1: JSX Transformation
-// =============================================================================
-// JSX: <div id="foo">Hello</div> → createElement('div', {id: 'foo'}, 'Hello')
-
-const JSX_EXAMPLE = createElement(
-  'div', { id: 'container' },
-  createElement('h1', null, 'Hello React'),
-  createElement('p', null, 'This is the DNA')
-);
-
-// =============================================================================
-// ARCHITECTURAL DNA: Fiber - The Work Unit
-// =============================================================================
-// React's secret: Break rendering into interruptible units (Fibers)
-
-function createFiber(element, parent) {
-  return {
-    type: element.type,
-    props: element.props,
-    parent, child: null, sibling: null,
-    alternate: null,    // Previous fiber for diffing
-    effectTag: null,    // PLACEMENT, UPDATE, DELETION
-    dom: null, hooks: null,
-  };
-}
-
-// =============================================================================
-// SIGNATURE PATTERN 2: Reconciliation Algorithm
-// =============================================================================
-// Compare old and new trees, compute minimal changes.
-// Same type = update, different type = replace
-
-function reconcileChildren(wipFiber, elements) {
-  let index = 0;
-  let oldFiber = wipFiber.alternate && wipFiber.alternate.child;
-  let prevSibling = null;
-
-  while (index < elements.length || oldFiber != null) {
-    const element = elements[index];
-    let newFiber = null;
-    const sameType = oldFiber && element && element.type === oldFiber.type;
-
-    if (sameType) {
-      newFiber = {
-        type: oldFiber.type, props: element.props, dom: oldFiber.dom,
-        parent: wipFiber, alternate: oldFiber, effectTag: 'UPDATE',
-      };
-    }
-    if (element && !sameType) {
-      newFiber = {
-        type: element.type, props: element.props, dom: null,
-        parent: wipFiber, alternate: null, effectTag: 'PLACEMENT',
-      };
-    }
-    if (oldFiber && !sameType) {
-      oldFiber.effectTag = 'DELETION';
-      deletions.push(oldFiber);
-    }
-
-    if (oldFiber) oldFiber = oldFiber.sibling;
-    if (index === 0) wipFiber.child = newFiber;
-    else if (element) prevSibling.sibling = newFiber;
-    
-    prevSibling = newFiber;
-    index++;
-  }
-}
-
-// =============================================================================
-// ARCHITECTURAL DNA: Work Loop & Scheduling
-// =============================================================================
-// React's superpower: Interruptible rendering via requestIdleCallback
-
-let nextUnitOfWork = null;
-let currentRoot = null;
-let wipRoot = null;
-let deletions = null;
-
-function workLoop(deadline) {
-  let shouldYield = false;
-  while (nextUnitOfWork && !shouldYield) {
-    nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
-    shouldYield = deadline.timeRemaining() < 1;
-  }
-  if (!nextUnitOfWork && wipRoot) commitRoot();
-  requestIdleCallback(workLoop);
-}
-
-function performUnitOfWork(fiber) {
-  const isFunctionComponent = fiber.type instanceof Function;
-  if (isFunctionComponent) {
-    updateFunctionComponent(fiber);
-  } else {
-    updateHostComponent(fiber);
-  }
-
-  if (fiber.child) return fiber.child;
-  let nextFiber = fiber;
-  while (nextFiber) {
-    if (nextFiber.sibling) return nextFiber.sibling;
-    nextFiber = nextFiber.parent;
-  }
-}
-
-function updateHostComponent(fiber) {
-  if (!fiber.dom) fiber.dom = createDom(fiber);
-  reconcileChildren(fiber, fiber.props.children);
-}
-
-function updateFunctionComponent(fiber) {
-  wipFiber = fiber;
-  hookIndex = 0;
-  wipFiber.hooks = [];
-  const children = [fiber.type(fiber.props)];
-  reconcileChildren(fiber, children);
-}
-
-// =============================================================================
-// SIGNATURE PATTERN 3: Hooks - State in Function Components
-// =============================================================================
-// React's innovation: State in functions via closure and fiber storage
-
-let wipFiber = null;
-let hookIndex = null;
-
-function useState(initial) {
-  const oldHook = wipFiber.alternate?.hooks?.[hookIndex];
-  const hook = { state: oldHook ? oldHook.state : initial, queue: [] };
-
-  const actions = oldHook ? oldHook.queue : [];
-  actions.forEach(action => { hook.state = action(hook.state); });
-
-  const setState = action => {
-    hook.queue.push(action);
-    wipRoot = { dom: currentRoot.dom, props: currentRoot.props, alternate: currentRoot };
-    nextUnitOfWork = wipRoot;
-    deletions = [];
-  };
-
-  wipFiber.hooks.push(hook);
-  hookIndex++;
-  return [hook.state, setState];
-}
-
-function useEffect(callback, deps) {
-  const oldHook = wipFiber.alternate?.hooks?.[hookIndex];
-  const hasChanged = !oldHook || !deps || deps.some((dep, i) => dep !== oldHook.deps[i]);
-  const hook = {
-    callback: hasChanged ? callback : oldHook.callback,
-    deps,
-    cleanup: oldHook?.cleanup,
-  };
-
-  if (hasChanged) {
-    if (hook.cleanup) hook.cleanup();
-    hook.cleanup = callback();
-  }
-
-  wipFiber.hooks.push(hook);
-  hookIndex++;
-}
-
-// =============================================================================
-// ARCHITECTURAL DNA: Commit Phase
-// =============================================================================
-// Two-phase rendering: Render (interruptible) → Commit (synchronous)
-// Ensures UI consistency - all changes applied at once
-
-function commitRoot() {
-  deletions.forEach(commitWork);
-  commitWork(wipRoot.child);
-  currentRoot = wipRoot;
-  wipRoot = null;
-}
-
-function commitWork(fiber) {
-  if (!fiber) {
-    return;
-  }
-
-  // Find parent DOM node (skip function components)
-  let domParentFiber = fiber.parent;
-  while (!domParentFiber.dom) {
-    domParentFiber = domParentFiber.parent;
-  }
-  const domParent = domParentFiber.dom;
-
-  if (fiber.effectTag === 'PLACEMENT' && fiber.dom != null) {
-    domParent.appendChild(fiber.dom);
-  } else if (fiber.effectTag === 'UPDATE' && fiber.dom != null) {
-    updateDom(fiber.dom, fiber.alternate.props, fiber.props);
-  } else if (fiber.effectTag === 'DELETION') {
-    commitDeletion(fiber, domParent);
-  }
-
-  commitWork(fiber.child);
-  commitWork(fiber.sibling);
-}
-
-function commitDeletion(fiber, domParent) {
-  if (fiber.dom) {
-    domParent.removeChild(fiber.dom);
-  } else {
-    commitDeletion(fiber.child, domParent);
-  }
-}
-
-// =============================================================================
-// SIGNATURE PATTERN 4: Props Diffing & DOM Updates
-// =============================================================================
-// React's optimization: Only update changed properties
-
-const isEvent = key => key.startsWith('on');
-const isProperty = key => key !== 'children' && !isEvent(key);
-const isNew = (prev, next) => key => prev[key] !== next[key];
-const isGone = (prev, next) => key => !(key in next);
-
-function updateDom(dom, prevProps, nextProps) {
-  // Remove old event listeners
-  Object.keys(prevProps)
-    .filter(isEvent)
-    .filter(key => !(key in nextProps) || isNew(prevProps, nextProps)(key))
-    .forEach(name => {
-      const eventType = name.toLowerCase().substring(2);
-      dom.removeEventListener(eventType, prevProps[name]);
-    });
-
-  // Remove old properties
-  Object.keys(prevProps)
-    .filter(isProperty)
-    .filter(isGone(prevProps, nextProps))
-    .forEach(name => {
-      dom[name] = '';
-    });
-
-  // Set new or changed properties
-  Object.keys(nextProps)
-    .filter(isProperty)
-    .filter(isNew(prevProps, nextProps))
-    .forEach(name => {
-      dom[name] = nextProps[name];
-    });
-
-  // Add new event listeners
-  Object.keys(nextProps)
-    .filter(isEvent)
-    .filter(isNew(prevProps, nextProps))
-    .forEach(name => {
-      const eventType = name.toLowerCase().substring(2);
-      dom.addEventListener(eventType, nextProps[name]);
-    });
-}
-
-function createDom(fiber) {
-  const dom =
-    fiber.type === 'TEXT_ELEMENT'
-      ? document.createTextNode('')
-      : document.createElement(fiber.type);
-
-  updateDom(dom, {}, fiber.props);
-  return dom;
-}
-
-// =============================================================================
-// EXTENSION POINT: Custom Hooks Pattern
-// =============================================================================
-// How React grows: Compose hooks to create reusable stateful logic
-
-function useCustomHook(key, initialValue) {
-  const [state, setState] = useState(initialValue);
-  useEffect(() => {
-    // Custom logic combining multiple hooks
-    const stored = localStorage.getItem(key);
-    if (stored) setState(JSON.parse(stored));
-  }, [key]);
-  return [state, (value) => {
-    setState(value);
-    localStorage.setItem(key, JSON.stringify(value));
-  }];
-}
-
-// =============================================================================
-// THE "AHA" CODE: Complete Working Example
-// =============================================================================
-// This demonstrates the entire React philosophy in action
-
-function Counter() {
-  const [count, setCount] = useState(0);
-  const [name, setName] = useState('React');
-
-  useEffect(() => {
-    document.title = `${name}: ${count}`;
-    return () => {
-      document.title = 'React DNA';
-    };
-  }, [count, name]);
-
-  return createElement(
-    'div',
-    null,
-    createElement('h1', null, `${name} Counter`),
-    createElement('p', null, `Count: ${count}`),
-    createElement(
-      'button',
-      { onClick: () => setCount(c => c + 1) },
-      'Increment'
-    ),
-    createElement(
-      'input',
-      {
-        value: name,
-        onInput: (e) => setName(e.target.value)
-      }
-    )
-  );
-}
-
-// Render function: The public API
-function render(element, container) {
-  wipRoot = {
-    dom: container,
-    props: {
-      children: [element],
-    },
-    alternate: currentRoot,
-  };
-  deletions = [];
-  nextUnitOfWork = wipRoot;
-}
-
-// Start the work loop
-requestIdleCallback(workLoop);
-
-// Usage:
-// render(createElement(Counter), document.getElementById('root'));
-
-// =============================================================================
-// WHAT MAKES REACT UNIQUE
-// =============================================================================
-
-/*
-1. DECLARATIVE UI: UI = f(state) - describe what, not how
-2. VIRTUAL DOM & RECONCILIATION: Diff old/new trees for minimal DOM updates
-3. FIBER ARCHITECTURE: Interruptible rendering units with priority scheduling
-4. COMPONENT COMPOSITION: Small reusable pieces with unidirectional data flow
-5. HOOKS: State and lifecycle in functions, composable stateful logic
-6. SYNTHETIC EVENTS: Cross-browser normalization with event delegation
-*/
-
-// NOT Vue (templates), Angular (framework), Svelte (compile-time), jQuery (imperative)
-
-// =============================================================================
-// MENTAL MODEL
-// =============================================================================
-
-/*
-React mental model: Component Tree → Virtual DOM → Fiber Tree → 
-Reconciliation → Effect List → Commit → Real DOM
-
-State change flow: setState → Schedule work → Reconcile → Commit → DOM update
-*/
-
-// =============================================================================
-// THE GENIUS MOVES
-// =============================================================================
-
-/*
-Key innovations:
-1. JSX - Write markup in JS with compile-time transformation
-2. One-way data flow - Props down, events up
-3. Reconciliation - Keys for identity, type-based diffing
-4. Fiber - Incremental rendering with pause/resume
-5. Hooks - Stateful logic without classes
-*/
-
-// =============================================================================
-// REAL WORLD PATTERNS
-// =============================================================================
-
-// Pattern 1: Render Props
-function DataProvider({ render }) {
-  const [data, setData] = useState(null);
-  useEffect(() => { /* fetch data */ }, []);
-  return render(data);
-}
-
-// Pattern 2: Higher-Order Components
-function withLoading(Component) {
-  return function({ isLoading, ...props }) {
-    return isLoading ? createElement('div', null, 'Loading...') : createElement(Component, props);
-  };
-}
-
-// Pattern 3: Context - Provider/Consumer for prop drilling avoidance
-
-// =============================================================================
-// IF YOU UNDERSTAND THIS, YOU UNDERSTAND REACT
-// =============================================================================
-
-const REACT_ESSENCE = {
-  // 1. UI as a function
-  render: (state) => createElement('div', null, state.value),
-  
-  // 2. State updates trigger reconciliation
-  setState: (newState) => {
-    // Schedule work by creating a new root fiber
-    nextUnitOfWork = createFiber(REACT_ESSENCE.render(newState), null);
-  },
-  
-  // 3. Reconciliation computes minimal DOM changes (conceptual)
-  // In actual implementation, reconcileChildren does this
-  
-  // 4. Commit applies changes synchronously (conceptual)
-  // In actual implementation, commitRoot and commitWork do this
+// ============================================================================
+// REFERENCE GENOME  (the competent default for a VDOM UI library in JS —
+// everything below must DEPART from this, or it is not DNA)
+// ============================================================================
+// A capable engineer ships: a createElement that returns a vnode tree, and a
+// recursive render() that diffs new-vnode-vs-old-vnode and patches the DOM in one
+// synchronous, uninterruptible walk from the root. State setters trigger a
+// re-render of the subtree, also synchronously. The diff and the DOM writes live
+// in the same pass; there is one renderer, and it is the DOM. (This is roughly
+// Preact: correct, small, and synchronous.)
+
+
+// ============================================================================
+// THE LOAD-BEARING BET  (reverse it and React becomes "just another VDOM lib")
+// ============================================================================
+// Make the render walk PAUSABLE. Work is split into per-fiber units; a scheduler
+// runs them in slices and asks shouldYield() between units; a higher-priority
+// update throws the in-progress tree away and restarts. The host is never touched
+// until a separate, synchronous commit. (Kernel verified-runnable; see
+// react-reconciler/src/ReactFiberWorkLoop.js: workLoopConcurrentByScheduler.)
+
+const host = {
+  // The reconciler never names a host — a renderer supplies these (here: strings).
+  createInstance: (t) => ({ t, children: [] }),
+  appendChild: (p, c) => p.children.push(c),
+  commit: (root) => serialize(root),
 };
+const serialize = (n) =>
+  n.t + (n.children.length ? `(${n.children.map(serialize).join(",")})` : "");
 
-/*
-The entire library in one sentence:
-"UI is a pure function of state, reconciled incrementally via a virtual 
- representation, and committed synchronously to the DOM."
-*/
+const h = (t, ...kids) => ({ t, kids });
+const APP = h("App", h("Header"), h("List", h("Item"), h("Item")));
+const unitsOf = (el, acc = []) => (acc.push(el), el.kids.forEach((k) => unitsOf(k, acc)), acc);
 
-export { createElement, render, useState, useEffect };
+let budget; // the scheduler's time slice: units allowed before we MUST yield
+const shouldYield = () => budget-- <= 0;
+
+function render(rootEl, priority) {
+  // RENDER = producing half: builds a work-in-progress tree, pausable & pure.
+  const wip = unitsOf(rootEl); // fresh WIP (fiber double-buffer: current.alternate)
+  budget = priority === "high" ? 1e9 : 3;
+  const built = host.createInstance(rootEl.t);
+  for (let i = 0; i < wip.length; i++) {
+    if (shouldYield()) return { done: false, at: i, total: wip.length }; // PAUSE
+    if (i > 0) host.appendChild(built, host.createInstance(wip[i].t)); // beginWork
+  }
+  return { done: true, built };
+}
+
+function schedule() {
+  // SCHEDULER drives render in slices; a high-pri update preempts and RESTARTS.
+  console.log("lo-pri render starts…");
+  const paused = render(APP, "low");
+  console.log(`  yielded after ${paused.at}/${paused.total} units — render is pausable`);
+  console.log("HIGH-PRI update arrives -> throw away in-progress work, restart");
+  const finished = render(APP, "high"); // interruption: WIP discarded, redone
+  console.log("  committed (consuming half, synchronous):", host.commit(finished.built));
+}
+// Runs as: yields after 3/5 units; restarts at high pri; commits App(Header,List,Item,Item).
+if (require.main === module) schedule();
+
+
+// ============================================================================
+// SIGNATURE PATTERNS  (the recurring SNPs — sketches, faithful but need not run)
+// ============================================================================
+
+// SNP 1 — DOUBLE-BUFFERED fibers: work happens on an off-screen `alternate` tree,
+// swapped to `current` only at commit — so an abandoned render leaves no trace.
+//   react-reconciler/src/ReactFiber.js: createWorkInProgress
+function createWorkInProgress(current, pendingProps) {
+  let wip = current.alternate;                 // reuse the spare buffer if present
+  if (wip === null) {
+    wip = createFiber(current.tag, pendingProps, current.key, current.mode);
+    wip.alternate = current;
+    current.alternate = wip;                    // two fibers per element, forever paired
+  }
+  return wip;                                   // mutate THIS; `current` stays intact
+}
+
+// SNP 2 — Hooks resolve through a MUTABLE dispatcher, so `useState` has no logic of
+// its own — the same call dispatches to mount-impl vs update-impl inside the
+// reconciler. The `react` package ships hooks that are pure indirection.
+//   react/src/ReactHooks.js + react-reconciler/src/ReactFiberHooks.js
+function useState(initial) {
+  const dispatcher = ReactSharedInternals.H;    // swapped per render phase
+  return dispatcher.useState(initial);          // mount vs update lives elsewhere
+}
+
+// SNP 3 — Priority is a 31-bit LANES bitmask, not a number: many updates coexist,
+// get batched/entangled by bitwise ops, and the scheduler renders the highest lane.
+//   react-reconciler/src/ReactFiberLane.js
+const NoLanes    = 0b0000000000000000000000000000000;
+const SyncLane   = 0b0000000000000000000000000000010; // discrete input -> sync
+const DefaultLane= 0b0000000000000000000000000100000; // normal updates
+const mergeLanes = (a, b) => a | b;            // entanglement is just bitwise-or
+
+
+// ============================================================================
+// STRUCTURAL COMMITMENTS  (the two bets the rest is organized around)
+// ============================================================================
+// (1) THE HOST-AGNOSTIC BOUNDARY — the reconciler imports every host primitive
+// from one module, `./ReactFiberConfig`, which is a BUILD-TIME fork: each renderer
+// substitutes its own (DOM, Native, ART, test, noop). `react-reconciler` is itself
+// a published package so anyone can supply a config and get React's full model.
+//   react-reconciler/src/ReactFiberConfig (fork) <- ReactFiberConfigDOM.js, etc.
+// sketch — resolved per renderer at BUILD time (kept as comment so it can't force
+// ESM resolution and break the kernel above):
+//   import { createInstance, appendInitialChild, commitUpdate, supportsMutation }
+//     from "./ReactFiberConfig";   // the DOM build points this at ReactFiberConfigDOM.js
+//   The `react` package itself touches NO host: grep `document.` in react/src ->
+//   matches only in __tests__. React-the-library has no DOM in it.
+
+// (2) THE RENDER/COMMIT SPLIT (both ends of the flow) — the producing half (render:
+// beginWork/completeWork building fibers) is interruptible and side-effect-free; the
+// consuming half (commit: commitMutationEffects then flushPassiveEffects) is one
+// synchronous, un-interruptible pass where ALL host mutations happen.
+//   react-reconciler/src/ReactFiberWorkLoop.js: workLoopConcurrentByScheduler + commitRoot
+function workLoopConcurrentByScheduler() {       // render: stop the instant time's up
+  while (workInProgress !== null && !shouldYield()) workInProgress = performUnitOfWork(workInProgress);
+}
+function commitRoot(root) {                       // commit: no yielding, host writes here
+  commitMutationEffects(root);                    // DOM is mutated in this pass only
+  requestPaint();
+  scheduleCallback(flushPassiveEffects);          // effects after paint
+}
+
+
+// ============================================================================
+// GROWTH SEAMS  (the actual extension surface)
+// ============================================================================
+// 1. New renderer: implement a HostConfig and call into `react-reconciler`
+//    (react-dom, react-native, react-art, react-three-fiber all do exactly this).
+// 2. New hook: compose existing hooks; or add a dispatcher method for a primitive.
+// 3. New priority behavior: define a Lane and its scheduling in ReactFiberLane.js.
+// 4. Suspense/lazy: throw a thenable during render; the reconciler retries the
+//    boundary when it resolves — render's restartability IS the extension point.
+
+
+// ============================================================================
+// NEGATIVE SPACE  (deliberately LEFT OUT — common to the ecosystem, not DNA)
+// ============================================================================
+// - createElement / JSX / vnode shape — every VDOM library has this; reference genome.
+// - Synthetic events, attribute/prop diffing, DOM property tables — react-dom detail,
+//   not the cross-renderer identity.
+// - Tree diffing / key-based child reconciliation — Preact, Vue, Inferno all diff too.
+// - The monorepo's devtools / build (rollup, flow, www) packages — tooling, not DNA.
+// - Server Components / Flight — a major bet, but a SEPARATE protocol layer; the core
+//   identity below stands without it.
+//
+// Rebuild test: from this file a senior dev could reconstruct React's character —
+//   "components are pure functions reconciled into a double-buffered fiber tree by an
+//   interruptible, lane-prioritized scheduler; the reconciler is host-agnostic behind
+//   a build-time config; render is pausable and pure, commit is synchronous and where
+//   the host is touched; hooks are dispatcher indirection." Yes.
+// Confusion test: strip the names and it still can't be Preact (which diffs
+//   synchronously, no fiber, no scheduler) nor Vue/Solid (fine-grained reactivity, no
+//   whole-tree re-render-and-diff). Only React re-renders top-down AND makes that walk
+//   interruptible and restartable. Passes.
