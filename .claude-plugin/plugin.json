@@ -1,0 +1,22 @@
+{
+  "name": "repo-dna",
+  "version": "1.0.0",
+  "description": "Extract a codebase's 'Repo-DNA' — the small variant fraction that makes it itself — as a single graspable file with a runnable kernel. Use to distill what makes a repo unique versus its peers.",
+  "author": {
+    "name": "Prabhanjana Kumar",
+    "email": "prabhi.c@gmail.com",
+    "url": "https://github.com/prabhic"
+  },
+  "homepage": "https://github.com/prabhic/repo-dna",
+  "repository": "https://github.com/prabhic/repo-dna",
+  "license": "MIT",
+  "keywords": [
+    "repo-dna",
+    "codebase-analysis",
+    "architecture",
+    "reverse-engineering",
+    "code-understanding",
+    "skill",
+    "claude-code"
+  ]
+}
