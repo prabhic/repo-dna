@@ -1,6 +1,10 @@
-# Repo-DNA
+<p align="center">
+  <img src="assets/repo-dna-banner.webp"
+       alt="Repo-DNA — Extracting the Genetic Code of Codebases"
+       width="840">
+</p>
 
-**Extracting the Genetic Code of Codebases**
+# Repo-DNA
 
 Every repository exists because it offers something unique. Like DNA in biology—where each organism has a distinct genetic signature—every codebase has core patterns, design decisions, and architectural choices that define its identity. **Repo-DNA** captures this essence.
 
