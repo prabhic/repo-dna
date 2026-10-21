@@ -32,7 +32,7 @@ function fold(events) {
   const effects = new Map()
   for (const event of events) {
     if (event.eventType === 'step_started') {
-      effects.set(event.key, { status: 'running', name: event.name, input: event.input })
+      effects.set(event.key, { status: 'running', name: event.name, input: event.input, replay: event.replay })
     } else if (event.eventType === 'step_completed') {
       const effect = effects.get(event.key)
       if (effect) {
@@ -44,10 +44,13 @@ function fold(events) {
   return effects
 }
 
-async function effect(events, key, name, input, run) {
+async function effect(events, key, name, input, run, replay = 'safe') {
   const prior = fold(events).get(key)
   if (prior?.status === 'completed') return prior.output
-  events.push({ eventType: 'step_started', key, name, input })
+  if (prior?.status === 'running' && replay === 'never') {
+    throw new Error(`interrupted non-replayable effect: ${key}`)
+  }
+  events.push({ eventType: 'step_started', key, name, input, replay })
   const output = await run()
   events.push({ eventType: 'step_completed', key, output })
   return output
@@ -58,7 +61,7 @@ async function runTurn(events, stopAfterTool = false) {
     tool: 'read',
     path: 'notes.md',
   }))
-  const contents = await effect(events, 'tool:0', 'tool.read', request, async () => 'ship the small fix')
+  const contents = await effect(events, 'tool:0', 'tool.read', request, async () => 'ship the small fix', 'never')
   if (stopAfterTool) return
   return effect(events, 'model:1', 'model', contents, async () => `Answer: ${contents}`)
 }
@@ -72,6 +75,12 @@ async function demo() {
   console.log('recovered:', answer)
   console.log('model calls:', events.filter((e) => e.eventType === 'step_started' && e.name === 'model').length)
   console.log('tool calls:', events.filter((e) => e.eventType === 'step_started' && e.name === 'tool.read').length)
+  try {
+    await effect([{ eventType: 'step_started', key: 'tool:uncertain', name: 'tool.write', replay: 'never' }],
+      'tool:uncertain', 'tool.write', {}, async () => 'must not run', 'never')
+  } catch {
+    console.log('ambiguous write re-run: blocked')
+  }
 }
 
 demo()
